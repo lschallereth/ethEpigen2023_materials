@@ -1,0 +1,101 @@
+---
+title: "Assignment week 3"
+author: "Laurin Schaller"
+date: "2023-03-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(Rsubread)
+  library(rtracklayer)
+  library(Biostrings)
+  library(Rfastp)
+  library(epiwraps)
+})
+ah <- AnnotationHub()
+```
+
+# QC and Trimming
+none
+
+# Index building
+```{r, eval=FALSE}
+# we get the genome sequence from AnnotationHub
+genome <- ah[["AH49674"]]
+# we create a new directory that will contain the genome index
+dir.create("BDGP6_genome")
+# we write the genome sequence in fasta format
+export(import.2bit(genome), "BDGP6_genome/genome.fasta.gz", compress=TRUE)
+# we build a Rsubread index
+Rsubread::buildindex("BDGP6_genome/rsubread", reference="BDGP6_genome/genome.fasta.gz")
+```
+```{r}
+dir.create("aligned")
+getwd()
+```
+# Alignment of reads
+```{r}
+align.stats <- Rsubread::align(index="BDGP6_genome/rsubread", type="dna",
+                               readfile1=c("raw/ENCFF127RRR.fastq.gz"),
+                               output_file=c("aligned/CTFC.bam"),
+                               nthreads=4, sortReadsByCoordinates=TRUE)
+align.stats
+```
+
+We have a high amount of mapped reads of 90.5% which seems good. A surprisingly large amount of them are unique mapped reads, so I susspect we would have many tiny peaks in the coverage plot at the end.
+
+Reads: 3'884'614
+Mapped reads: 90.5% -> 3'515'416 of 3'884'614
+
+# Peaks
+In total the peaks variable contains 2'873 elements, so thats 2'873 peaks.
+```{r}
+peaks <- callPeaks("aligned/CTFC.bam", fragLength=50L)
+# if we want to save it as a bed file:
+dir.create("peaks")
+rtracklayer::export.bed(peaks, "peaks/peaks.bed")
+```
+## Peaks exploration
+Lets look at a peak with a high score of 1000
+```{r}
+head(peaks)
+peaks$score
+region <- as.character(granges(peaks[828]))
+region
+plotSignalTracks(c(Myc="aligned/CTFC.bam"), region=region)
+```
+This peak looks a bit dense. Let's zoom out with the region value by adding and subtracting some positions.
+```{r}
+#head(peaks)
+#peaks$score
+regionhigh <- "3R:14391067-14391783"
+regionhigh
+plotSignalTracks(c(Myc="aligned/CTFC.bam"), region=regionhigh)
+```
+
+Now lets look at a lower score peak. Interestingly this is on a different chromosome. It is on chromosome 2 and not 3
+```{r}
+#head(peaks)
+#peaks$score
+regionlow <- as.character(granges(peaks[13]))
+regionlow
+plotSignalTracks(c(Myc="aligned/CTFC.bam"), region=regionlow)
+```
+
+This peak looks a bit dense. Let's zoom out with the regionlow value by adding and subtracting some positions.
+```{r}
+#head(peaks)
+#peaks$score
+regionlow2 <- "2L:207035-207830"
+regionlow2
+plotSignalTracks(c(Myc="aligned/CTFC.bam"), region=regionlow2)
+```
+
+This was interesting, but what about all the other peaks? Which one is the promotor interacting with?
