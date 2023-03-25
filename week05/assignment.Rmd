@@ -1,0 +1,152 @@
+---
+title: "Assignment week 05"
+author: "Laurin Schaller"
+date: "2023-03-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(ensembldb)
+  library(GenomicRanges)
+  library(epiwraps)
+  library(rtracklayer)
+  library(ggplot2)
+})
+```
+
+# Loading embryonic stem cell peaks from last week
+
+```{r}
+peaksmESCH3K27me3 <- rtracklayer::import("../week04/encode/H3K27me3.broadpeak")
+peaksmESCH3K4me3<- rtracklayer::import("../week04/encode/H3K4me3.broadpeak")
+```
+
+## Using the peaks you downloaded last week, identify bivalent domains (H3K27me3 + H3K4me3) in mouse embryonic stem cells (mESC)
+
+First I was using overlapsAny, but because it is not symetrical I created two variables. I tried findOverlaps, could not get it to work correctly but later saw on Slack that overlapsAny is fine for the exercise so I went back to it.
+
+But it was interesting to try this function which as shown below is symetrical. It gives you indeces of the elements in the Granges objects. As a test we can see that ranges 4483082-4484081 and 4483244-4483808 overlap.
+
+```{r}
+mESCOverlap1 <- findOverlaps(peaksmESCH3K4me3, peaksmESCH3K27me3)
+mESCOverlap2 <- findOverlaps(peaksmESCH3K27me3, peaksmESCH3K4me3)
+head(mESCOverlap1)
+head(mESCOverlap2)
+peaksmESCH3K4me3[4]
+peaksmESCH3K27me3[9]
+length(mESCOverlap1)
+```
+```{r}
+bivalentPeaks1 <- overlapsAny(peaksmESCH3K4me3, peaksmESCH3K27me3)
+bivalentPeaks2 <- overlapsAny(peaksmESCH3K27me3, peaksmESCH3K4me3)
+table(bivalentPeaks1)
+table(bivalentPeaks2)
+```
+
+Using the boolean values we can get the GRanges from the peaks variables
+```{r}
+bivalentGRangesmESC2 <- peaksmESCH3K27me3[bivalentPeaks2]
+bivalentGRangesmESC1 <- peaksmESCH3K4me3[bivalentPeaks1]
+head(bivalentGRangesmESC1)
+head(bivalentGRangesmESC2)
+length(bivalentGRangesmESC1)
+length(bivalentGRangesmESC2)
+
+#peaksmESC <- c(peaksH3K4me3, peaksH3K27me3)
+#head(peaksmESC)
+#bivalentPeaksmESC <- reduce(peaksmESC[mESCOverlap1], "GRanges")
+```
+
+
+# Downloading peaks for H3K27me3 and H3K4me3
+
+Here I am using adult heart tissue from the same sets of experiments as last week by Bing Ren.
+
+The ES-Bruce4 cell line is derived from the Black6 strain "C57BL/6" while the heart samples are 
+labeled "B6NCrl" on the GEO site. As far as I understand these are the same Black6 mouse strains though.
+```{r, eval=FALSE}
+options(timeout=999999)
+download.file("https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSM1000131&format=file&file=GSM1000131%5Fmm9%5FwgEncodeLicrHistoneHeartH3k27me3MAdult8wksC57bl6StdPk%2EbroadPeak%2Egz", "heart_H3K27me3.broadPeak.gz")
+download.file("https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSM769017&format=file&file=GSM769017%5FwgEncodeLicrHistoneHeartH3k4me3MAdult8wksC57bl6StdPk%2EbroadPeak%2Egz", "heart_H3K4me3.broadPeak.gz")
+```
+```{bash, eval=FALSE}
+gunzip heart_H3K27me3.broadPeak.gz
+gunzip heart_H3K4me3.broadPeak.gz
+```
+
+# Finding overlaps
+## How many of the mESC bivalent domains are, in this differentiated cell type, overlapping either mark or their combination (in this differentiated cell type)?
+
+Lets first load the individual peaks for the adult heart tissue
+```{r}
+peaksHeartH3K27me3 <- rtracklayer::import("heart_H3K27me3.broadPeak")
+peaksHeartH3K4me3<- rtracklayer::import("heart_H3K4me3.broadPeak")
+```
+
+Now lets find the bivalent site in the adult heart tissue. Again this is not symetric so lets do this both ways
+```{r}
+bivalentHeartPeaks1 <- overlapsAny(peaksHeartH3K4me3, peaksHeartH3K27me3)
+bivalentHeartPeaks2 <- overlapsAny(peaksHeartH3K27me3, peaksHeartH3K4me3)
+bivalentGRangesmHeart2 <- peaksHeartH3K27me3[bivalentHeartPeaks2]
+bivalentGRangesmHeart1 <- peaksHeartH3K4me3[bivalentHeartPeaks1]
+```
+
+```{r}
+bivalentOverlapsBivalent <- overlapsAny(bivalentGRangesmESC1, bivalentGRangesmHeart1)
+bivalentOverlapsH3K4me3 <- overlapsAny(bivalentGRangesmESC1, peaksHeartH3K4me3)
+bivalentOverlapsH3K27me3 <- overlapsAny(bivalentGRangesmESC1, peaksHeartH3K27me3)
+table(bivalentOverlapsBivalent)
+table(bivalentOverlapsH3K4me3)
+table(bivalentOverlapsH3K27me3)
+#regionUpset(peaksData)
+```
+```{r}
+982 / (1975+982) * 100
+```
+Only 33.2% of these poised sites are still present in the adult heart tissue. This makes sense since we have differentiated cells now.
+
+The last third of these poised sites which perisist in the adult tissue but are not transcribed might be genes required for common responses against certain stimuli. For example they could be some kind of stress response genes.
+
+To test this hypothesis we could give these GRanges to AnnotationHub and see which genes are located there.
+
+```{r}
+1594 / (1363+1594) * 100
+```
+Slightly more than half of the poised sites are now marked with H3K4me3 which is associated with activation.
+
+For heart tissue sites that lost this poised state could be genes like Troponin I or Troponin T which are only transcribed in the adult heart tissue.
+
+
+```{r}
+2173  / (784+2173) * 100
+```
+
+Most of these poised sites are now marked by H3K27me3 which is associated with translational repression.
+
+This could be in genes which are commonly trancribed in other cell types but not in the heart. Maybe one of those genes could be keratin of skin cells
+
+# Locating genes
+The encode webpage mentioned something about the mm10 reference, so I tried to load different annotations for this genome but it would not work unfortunatly.
+```{r}
+ah <- AnnotationHub()
+```
+```{r}
+q <- query(ah, c("Mus musculus", "mm10", "UCSD"))
+q
+```
+```{r, eval=FALSE}
+c57bl6 <- ah[["AH14502"]]
+```
+```{r, eval=FALSE}
+genes <- genes(c57bl6)
+GRangesTest <- bivalentGRangesmESC1[bivalentOverlapsH3K4me3]
+test <- overlapsAny(GRangesTest, genes)
+geneOverlaps <- genes[test]
+```
+
