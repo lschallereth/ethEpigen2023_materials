@@ -1,0 +1,166 @@
+---
+author: "Laurin Schaller"
+date: "2023-03-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+ 
+# Setup
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(ensembldb)
+  library(GenomicRanges)
+  library(epiwraps)
+  library(rtracklayer)
+  library(ggplot2)
+})
+```
+Incomplete homework, just could not get it to play nicely. I also ran into memory issues multiple times causing freezes and graphical issues in RStudio.
+I have set up a less memory hungry Linux distro than Windows for dual boot fo the next exercises.
+
+# Biological background
+
+I am looking at the Pax5-Transcription-factor which is active in B-cells
+
+What I initially wanted to do (but ran into a bunch of errors):
+
+Today I am looking at the transcription factor IRF3 in human B cells. It is activated during viral infections and triggers many different responses. It will cause transcription of interferons but apparently is also involved in the activation of APOBEC which causes mutations in the viral genome if it is encountered in the cytosol by causing mutations through a deaminase which changes the base type. Let's see if we can see this here.
+
+The cell type is GM12878 which is an immortalized B-cell line.
+https://www.encodeproject.org/experiments/ENCSR000EEJ/
+
+```{r, eval=FALSE}
+options(timeout=999999)
+download.file("https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSM935650&format=file&file=GSM935650%5Fhg19%5FwgEncodeSydhTfbsHepg2Irf3IggrabPk%2EnarrowPeak%2Egz", "IRF3.narrowPeak.gz")
+download.file("https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSE208844&format=file&file=GSE208844%5FENCFF334ZLK%5FIDR%5Franked%5Fpeaks%5FGRCh38%2Ebed%2Egz", "Bcell.bed.gz")
+download.file("https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSM803362&format=file&file=GSM803362%5Fhg19%5FwgEncodeHaibTfbsGm12878Pax5n19Pcr1xPkRep1%2EbroadPeak%2Egz", "BcellPax5.broadPeak.gz")
+```
+```{bash, eval=FALSE}
+gunzip IRF3.narrowPeak.gz
+gunzip Bcell.bed.gz
+gunzip BcellPax5.broadPeak.gz
+```
+
+
+Imporign problems and convering issues lead me to switch to Pax5
+```{r}
+peaksIRF3 <- rtracklayer::import("IRF3.narrowPeak")
+
+peaksBcellPax5 <- rtracklayer::import("BcellPax5.broadPeak")
+
+bed_file <- "Bcell.bed"
+
+# Read in the BED file using read.table()
+bed_df <- read.table(bed_file, header = FALSE, sep = "\t", colClasses = c("character", "integer", "integer", "character", "integer", "character", "numeric", "numeric", "numeric", "integer", "numeric", "numeric", "integer", "integer", "numeric", "integer", "integer", "integer", "numeric", "integer"))
+
+# Replace invalid strand values with *
+bed_df$V4[!bed_df$V4 %in% c("+", "-", "*")] <- "*"
+
+# Replace . values with NA in the names column
+bed_df$V6[bed_df$V6 == "."] <- NA
+
+# Rename metadata columns
+colnames(bed_df)[8] <- "signalValue"
+colnames(bed_df)[9] <- "pValue"
+colnames(bed_df)[10] <- "qValue"
+colnames(bed_df)[11] <- "peak"
+
+# Convert the data frame to a GRanges object
+bed_granges <- GRanges(seqnames = bed_df$V1, 
+                       ranges = IRanges(start = bed_df$V2, end = bed_df$V3),
+                       strand = bed_df$V4,
+                       name = bed_df$V6,
+                       score = bed_df$V7,
+                       metadata = bed_df[, 8:ncol(bed_df)])
+```
+
+```{r}
+head(peaksIRF3)
+head(peaksBcellPax5)
+peaksIRF3$strand
+head(bed_granges)
+```
+```{r, eval=FALSE}
+ah <- AnnotationHub()
+```
+# Searching for and loading the GRCh37 reference genome
+Strange error after running it for the second time
+```{r, eval=FALSE}
+query <- query(ah, c("GRCh37", "ensembl"))
+query
+```
+```{r, eval=FALSE}
+genome <- ah[["AH13964"]]
+```
+# Peaks size and shortening peaks
+It was mentioned in the example that we should keep in mind the length of the peaks. Here I used a broadpeaks file which would contain longer peaks compared to other peak files. I calculated the peaks width and looked at their distribution. About 95%  of the peaks are shorter than 550bp so I will shorten these peaks to that length.
+
+```{r}
+peaksWidth <- width(peaksBcellPax5)
+summary(peaksWidth)
+quantile(peaksWidth, c(0.90))
+plot(peaksWidth)
+```
+```{r}
+#showMethods("getSeq")
+```
+BioStrings does not like the GRanges object. I searched AnnotationHub again for a twobitfile of the hg19/GRCh37 reference genome.
+Importing the other libraries before breaks annotationhub sometimes so I load libraries as I go.
+
+```{r}
+library(Biostrings)
+```
+
+
+```{r}
+peak_centers <- resize(peaksBcellPax5, fix="center", width=450)
+peak_seqs <- Biostrings::getSeq(genome, peak_centers)
+peak_seqs
+```
+Wow this looks pretty. Interestingly in the first peak at the first position the nucleotide is not determined.
+
+# Search in Motif database
+Groupreport error
+```{r}
+library(MotifDb)
+library(TFBSTools) # for handling some motif formats
+library(universalmotif) # for converting motifs to various formats
+library(PWMEnrich)
+# we search for "Pax5" in the motif database
+motifs <- query(MotifDb, "Pax5")
+# there are several matching motifs:
+names(motifs)
+# we select one:
+motif <- motifs[["Hsapiens-jaspar2022-PAX5-MA0014.3"]]
+# we visualize it:
+view_motifs(motif)
+```
+# Motif enrichment analysis
+```{r}
+# prepare multithreading:
+
+registerCoresPWMEnrich(1)
+# launch the analysis:
+res <- motifEnrichment(peak_seqs, convert_motifs(motif, "PWMEnrich-PWM"))
+# for the sake of example, we'll just use the first 300 sequences:
+#res <- motifEnrichment(head(peak_seqs, convert_motifs(motifs, "PWMEnrich-PWM"))
+groupReport(res)
+```
+#Lets try motif scanning then
+This one often destroys the little RAM I have left.
+Error due to RAM-shortage when trying to write genome to file. (Even though there is still around 1GB available)
+```{r}
+# if you don't already have the genome in fasta format saved somewhere, convert it to that format:
+Biostrings::writeXStringSet(rtracklayer::import(genome), "genome.fa")
+# we also need to convert the motif to a format that this package will accept
+motif2 <- convert_motifs(motif, class="TFBSTools-PFMatrix")
+# if we had a list of motifs instead, we'd convert them like this:
+# motifs2 <- setNames(do.call(PFMatrixList, convert_motifs(motifs, class="TFBSTools-PFMatrix")), names(motifs))
+moi2 <- motifmatchr::matchMotifs(motif2, subject=peak_centers, genome=Rsamtools::FaFile("genome.fa"), out="positions")[[1]]
+head(moi2)
+```
