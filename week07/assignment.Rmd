@@ -1,0 +1,223 @@
+---
+title: "Assignment week 07"
+author: "Laurin Schaller"
+date: "2023-04-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# I have to first load the genome, save the chr19 data and then clear memory before continuing
+NOTE: Due to RStudio RAM allocation I had to first get the chr19 subset and clean RStudio RAM usage befor continuing with anything else.
+```{r}
+library(AnnotationHub)
+ah <- AnnotationHub()
+ensdb <- ah[["AH89211"]] # mouse ensembldb object
+genome <- ah[["AH68356"]]
+chr19 <- import(genome)["19"]
+gc()
+```
+
+
+# Packages and reference genome
+
+```{r}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  #library(AnnotationHub)
+  library(MotifDb)
+  #library(memes)
+  library(universalmotif)
+  library(ensembldb)
+  library(ggplot2)
+})
+
+#ah <- AnnotationHub()
+#ensdb <- ah[["AH89211"]] # mouse ensembldb object
+```
+
+# Exploring genes
+
+We can get all the genes and order them to explore interesting genes to look at. We have to sort them and exclude the generic names. Some interesting genes show up like Apex which repeairs abasic sites.
+
+But lets not get distracted and look for transcription factors instead. AP1 genes show up which is an important TF in proliferation, so lets choose this one.
+
+```{r}
+genesData <- genes(ensdb)
+geneNames <- genesData$gene_name
+geneNamesSorted <- sort(geneNames)
+geneNamesSorted[3000:4000]
+```
+
+## AP1-TF
+
+AP1- is a commonly expressed TF involved in proliferation.
+A quick search on wikipedia shows the binding sequence to be:\
+5'-TGA G/C TCA-3
+
+Let's see if we can find this motif
+
+![](https://upload.wikimedia.org/wikipedia/commons/thumb/d/db/UM_chem505_1FOS_c-jun_%252C_c-fos_heterodimer.png/560px-UM_chem505_1FOS_c-jun_%252C_c-fos_heterodimer.png){width="317"}
+
+## AP-1 motif search
+Unfortunately we do not get any results for AP-1
+
+```{r}
+# get AP1 motif
+motif <- query(MotifDb, c("AP-1","Mus"))
+names(motif)
+```
+## ATF2 motif search
+Let's try ATF2 instead which is of the same family as AP-1. It is known to regulate regulate many genes including genes on chromosome 19.
+
+Great, the resulting motif is very similar to what we expect from this type of family. Is is very close to the expected TGA G/C TCA. This is fun.
+
+```{r}
+# get ATF2 motif
+motif <- query(MotifDb, c("ATF2","Mus"))
+names(motif)
+motif <- motif[[2]]
+view_motifs(motif)
+```
+# Convering motif, loading genome, finding motifs through motifmatchr
+
+```{r}
+motif2 <- convert_motifs(motif, class="TFBSTools-PFMatrix")
+#genome <- ah[["AH68356"]]
+
+# This destroys my RAM
+# get the sequence for chr19:
+#chr19 <- import(genome)["19"]
+#Writing to FASTA first and loading again
+#writeXStringSet(chr19, "chr19.fa")
+
+# find motif occurences
+# here we could use any of the 3 methods we've seen: memes::runFimo, findMotifInstances, or this:
+moi <- motifmatchr::matchMotifs(motif2, chr19, out="positions", p.cutoff=1e-5)[[1]]
+# convert to GRanges (when using motifmatchr)
+moi <- as(setNames(moi,names(chr19)), "GRanges")
+```
+# Plotting signal around ATF2 motif
+We can see a clear dip right where the motif is in the nucleosome free fragments.
+However the density seems low. I have tried lowering the cutof-value above, but then the image becomes "blurry".
+
+I realized just now that choosing ATF2 probably was not the best idea because it is part of the leucine zipper family which have similar motifs.
+```{r}
+# we prepare the list of tracks
+tracks <- c("All cuts"="full_cuts.bw", "NF cuts"="NF_cuts.bw", "Mono centers"="mono_centers.bw")
+
+# extract signals around the motif occurences
+# we zoom in to 500bp around the motif centers, in windows of 5bp
+sm <- signal2Matrix(tracks, moi, w=5, extend=500)
+
+# plot the signals:
+#plotEnrichedHeatmaps(sm, trim=0.95, colors = c("white","darkred"))
+
+# we renormalize using border backgrounds
+#smb <- renormalizeBorders(sm)
+#plotEnrichedHeatmaps(smb, trim=0.95, colors = c("white","darkred"), minRowVal = 20)
+
+# the right to do this, however, is using a background normalization
+# this we can do for instance using:
+nf <- bwNormFactors(tracks, useSeqLevels="19", nwind=5000L)
+# then we apply the normalization factors:
+smb <- rescaleSignalMatrices(sm, nf)
+plotEnrichedHeatmaps(smb, trim=0.95, colors = c("white","darkred"))
+```
+## Foxa2 motif search
+For the next example I searched for a TF with a distinct motif. Such an example is Foxa2
+
+```{r}
+# get Foxa2 motif
+motifsFoxa2 <- query(MotifDb, c("Foxa2","Mus"))
+names(motifsFoxa2)
+Foxa2motif <- motifsFoxa2[[5]]
+view_motifs(Foxa2motif)
+```
+```{r}
+motif3 <- convert_motifs(Foxa2motif, class="TFBSTools-PFMatrix")
+#genome <- ah[["AH68356"]]
+
+# This destroys my RAM
+# get the sequence for chr19:
+#chr19 <- import(genome)["19"]
+#Writing to FASTA first and loading again
+#writeXStringSet(chr19, "chr19.fa")
+
+# find motif occurences
+# here we could use any of the 3 methods we've seen: memes::runFimo, findMotifInstances, or this:
+moi2 <- motifmatchr::matchMotifs(motif3, chr19, out="positions", p.cutoff=1e-4)[[1]]
+# convert to GRanges (when using motifmatchr)
+moi2 <- as(setNames(moi2,names(chr19)), "GRanges")
+```
+# Plotting signal around Foxa2 motif
+Setting the cutoff for the motif at 10^-4 allows us to see a little bit of the dip for the TF although it is not very clear.
+```{r}
+# extract signals around the motif occurences
+# we zoom in to 500bp around the motif centers, in windows of 5bp
+sm2 <- signal2Matrix(tracks, moi2, w=5, extend=500)
+
+# plot the signals:
+#plotEnrichedHeatmaps(sm2, trim=0.95, colors = c("white","darkred"))
+
+# we renormalize using border backgrounds
+#smb <- renormalizeBorders(sm)
+#plotEnrichedHeatmaps(smb, trim=0.95, colors = c("white","darkred"), minRowVal = 20)
+
+# the right to do this, however, is using a background normalization
+# this we can do for instance using:
+nf2 <- bwNormFactors(tracks, useSeqLevels="19", nwind=5000L)
+# then we apply the normalization factors:
+smb2 <- rescaleSignalMatrices(sm2, nf2)
+plotEnrichedHeatmaps(smb2, trim=0.95, colors = c("white","darkred"))
+```
+
+-
+# Get Sox2 motif
+
+A bit later we were told the data is from mESC's. So I expect Sox2 to be active there. This so far looks like the most distinct motif of the three factors.
+```{r}
+motifsSox2 <- query(MotifDb, c("Sox2","Mus"))
+names(motifsSox2)
+Sox2motif <- motifsSox2[[13]]
+view_motifs(Sox2motif)
+```
+```{r}
+motif4 <- convert_motifs(Foxa2motif, class="TFBSTools-PFMatrix")
+#genome <- ah[["AH68356"]]
+
+# This destroys my RAM
+# get the sequence for chr19:
+#chr19 <- import(genome)["19"]
+#Writing to FASTA first and loading again
+#writeXStringSet(chr19, "chr19.fa")
+
+# find motif occurences
+# here we could use any of the 3 methods we've seen: memes::runFimo, findMotifInstances, or this:
+moi3 <- motifmatchr::matchMotifs(motif4, chr19, out="positions", p.cutoff=1e-5)[[1]]
+# convert to GRanges (when using motifmatchr)
+moi3 <- as(setNames(moi3,names(chr19)), "GRanges")
+```
+Unfortunately this does not look clrearer.
+```{r}
+# extract signals around the motif occurences
+# we zoom in to 500bp around the motif centers, in windows of 5bp
+sm3 <- signal2Matrix(tracks, moi2, w=5, extend=500)
+
+# plot the signals:
+#plotEnrichedHeatmaps(sm2, trim=0.95, colors = c("white","darkred"))
+
+# we renormalize using border backgrounds
+#smb <- renormalizeBorders(sm)
+#plotEnrichedHeatmaps(smb, trim=0.95, colors = c("white","darkred"), minRowVal = 20)
+
+# the right to do this, however, is using a background normalization
+# this we can do for instance using:
+nf3 <- bwNormFactors(tracks, useSeqLevels="19", nwind=5000L)
+# then we apply the normalization factors:
+smb3 <- rescaleSignalMatrices(sm3, nf3)
+plotEnrichedHeatmaps(smb3, trim=0.95, colors = c("white","darkred"))
+```
+
