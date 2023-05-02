@@ -1,0 +1,175 @@
+---
+title: "Assignement Week 08"
+author: "Laurin Schaller"
+date: "2023-04-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Downloading data and setup
+
+```{r, eval=FALSE}
+download.file("https://ethz-ins.org/content/mouse_mm38_hippocampus.peakCounts.SE.rds", "mouse_mm38_hippocampus.peakCounts.SE.rds")
+```
+```{r}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  library(motifmatchr)
+  library(MotifDb)
+  library(universalmotif)
+  library(sechm)
+  library(BiocParallel)
+  library(ggplot2)
+  library(chromVAR) # for motif accessibility estimation
+  library(SummarizedExperiment) # data structure
+  library(limma) # for statistical analysis
+})
+# to control multithreading, unix users can use:
+#register(MulticoreParam(4))
+# for windows users, rather one of the following:
+register(SerialParam())
+# register(SnowParam(2))
+```
+# Reading data and data exploration
+We can see that there are three data sets for each gender and both control and experiment conditions. These are the amount of aligned fragments per peak.
+Just like in the practical we can also denote this data with conditions.
+```{r}
+filename <- "mouse_mm38_hippocampus.peakCounts.SE.rds"
+seData <- readRDS(filename)
+seData
+colnames(seData)
+seData$condition <- c("CTRL","CTRL","CTRL", "CTRL","CTRL","CTRL", "FSS", "FSS", "FSS", "FSS", "FSS", "FSS")
+seData$condition
+colData(seData)
+```
+# Get the database of motifs
+The data is from mice so we have to search for mus musculus instead.
+
+Last assignment I had used a lot of motif data from Jaspar so lets see what would happen if we used **JASPAR_CORE** instead.
+It creates a MotifList of only 47 entries. This is less than the hocomoco database. So it is not as extensive.
+```{r}
+motifs <- query(MotifDb, c("JASPAR_CORE", "mus"))
+length(motifs)
+motifs <- query(MotifDb, c("HOCOMOCOv11-core", "Hsapiens"))
+length(motifs)
+motifs <- do.call(TFBSTools::PWMatrixList, setNames(
+           universalmotif::convert_motifs(motifs, class="TFBSTools-PWMatrix"),
+           mcols(motifs)$geneSymbol))
+```
+#Reference genome
+Loading the mouse GRCm38 reference genome from the week 06 practical.
+This created a DNASringSet which is quite large at 3GB. Not sure if there is a more resourceful way of loading it.
+```{r}
+library(AnnotationHub)
+library(Biostrings)
+ah <- AnnotationHub(localHub=TRUE)
+genome <- ah[["AH68356"]]
+genomeSeq <- Biostrings::getSeq(genome)
+tail(genomeSeq)
+```
+# Adding GC bias, find motifs within peaks, calculating deviations
+We can see that the motifmatchr gives us an object with our 20660 peaks and the 400 motifs we have retrieved from the motifDB.
+The deviations data has a dimension of 400x12 which corresponds to our 6 controls and 6 expierment conditions.
+```{r}
+seData <- chromVAR::addGCBias(seData, genome=genomeSeq)
+moi <- motifmatchr::matchMotifs(motifs, subject=seData, genome=genomeSeq)
+moi
+
+dev <- chromVAR::computeDeviations(object = seData, annotations=moi,
+                                   background_peaks=getBackgroundPeaks(seData, niterations=1000))
+dev
+colData(dev)
+
+variability <- computeVariability(dev)
+plotVariability(variability)
+```
+
+# Normalization and deviation data
+```{r}
+head(assays(dev)$z)
+assays(dev)$norm <- scale(assays(dev)$z)
+dev
+dev$condition
+```
+```{r}
+head(deviations(dev))
+```
+# Different conditions based on control vs. healthy + female vs. male
+We first have to reduce the conditions to only control and FSS first. Then later we will use 
+```{r}
+#dev$condition <- c("CTRL","CTRL","CTRL", "CTRL","CTRL","CTRL", "FSS", "FSS", "FSS", "FSS", "FSS", "FSS")
+dev$condition <- factor(dev$condition)
+dev$condition <- relevel(dev$condition, c("CTRL"))
+dev$condition
+```
+```{r}
+mm <- model.matrix(~dev$condition)
+mm
+```
+# Fit exploration and volcano plot
+
+EDIT: I only later realized these are not the adjusted p-values, but could not acces them through **res2[res2$adj.P.Val < 0.05]**
+
+Ordering by p-values gives us two significant p-values: 0.0002194991, and 0.0003395728. The next lowest p-value is 0.07210881
+Indeed in the volcano plot and the sechm heatmap we find only two clear motifs.
+
+These are GCR and PRGR which we already know to be involved in the stress response.
+
+```{r}
+fit <- eBayes(lmFit(assays(dev)$norm, mm))
+order(fit$F.p.value)
+fit$F.p.value[106]
+fit$F.p.value[251]
+fit$F.p.value[172]
+res <- as.data.frame(topTable(fit, number = Inf))
+head(res)
+
+res$TF <- row.names(res)
+ggplot(res, aes(logFC, -log10(adj.P.Val), label=TF)) + geom_text() 
+
+sechm(dev, features = head(row.names(res)), assayName="norm", top_annotation = c("condition", "depth"))
+```
+# Adding gender information to graph
+
+Just to play around with this data format
+
+```{r}
+dev$gender <- c("FEMALE","FEMALE","FEMALE", "MALE","MALE","MALE", "FEMALE", "FEMALE", "FEMALE", "MALE", "MALE", "MALE")
+dev$gender <- factor(dev$gender)
+dev$gender <- relevel(dev$gender, c("FEMALE"))
+dev$gender
+
+sechm(dev, features = head(row.names(res)), assayName="norm", top_annotation = c("condition", "depth", "gender"))
+```
+# New model but for gender differences
+
+We have to be careful now as there are 3 female controls, 3 male controls, 3 female experiment conditions and then 3 male experiment conditions. But this looks right.
+
+```{r}
+mm2 <- model.matrix(~dev$gender)
+mm2
+```
+This is strange. It seems there are over 50 significant motifs out of 400 motifs. (Again not adjusted ones)
+In the lecture we discussed that there usually are not many gender specific differences.
+After doing some quick literature research on genecards it turns out that ZFP42 and TYY1 are expressed in male germ line. It makes sense that we would see less expression in female, but at the same time it also doesn't make sense because this data is from the hippocampus.
+
+```{r}
+fit2 <- eBayes(lmFit(assays(dev)$norm, mm2))
+order(fit2$F.p.value)
+fit2$F.p.value[345]
+fit2$F.p.value[329]
+fit2$F.p.value[335]
+fit2$F.p.value[fit2$F.p.value < 0.05]
+
+res2 <- as.data.frame(topTable(fit2, number = Inf))
+head(res2)
+
+res2$TF <- row.names(res2)
+ggplot(res2, aes(logFC, -log10(adj.P.Val), label=TF)) + geom_text() 
+
+sechm(dev, features = head(row.names(res2)), assayName="norm", top_annotation = c("gender", "depth"))
+```
+s
