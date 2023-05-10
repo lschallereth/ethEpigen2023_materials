@@ -1,0 +1,80 @@
+---
+title: "Project idea"
+author: "Laurin Schaller, Julian Ortner, Charles Cheruparambil"
+date: "2023-05-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Group composition
+
+Laurin Schaller, Julian Ortner, Charles Cheruparambil
+
+## Project topic
+
+Multiple myeloma (MM) is a type of cancer where the plasma B-cells become abberant and overproliferate. At a later stage the plasma cells produce too much normal and fragmented Immunoglobulin. The disease progression includes changes at the epigenetic level with hyperacetylation and hypermethylation being well characterized in these cells. [1]
+
+The histone code has become a target for drugs as a result with drugs like Panobinostat. The drug causes an inhibition of histone deacetylases. This in turn causes new expression of tumor supressors and apoptosis inducing factors. [2]
+
+![MM disease progression](images/Screenshot%202023-05-06%20085257.jpg)
+
+## Project data
+
+For our project we will use publicly available data from the ENCODE project. The Histone CHiP-sequencing data comes from a MM.1S cell line which is used as a model for MM. This cell line was shown to be one of the most representative cell lines for MM. [3]
+
+From ENCODE we can choose between different healthy B-cell datasets. The datasets are from a female, just like the MM.1S cells. [4] There are datasets from only a 27 year old female and ones that area mix of a 27 year old female and a 37 year old female. **Can we take both?**
+
+The datasets include the histone modifications that we discussed in class. Are the other ones not so important? Here is a table of the available datasets:
+
+|          |             |                       |
+|----------|-------------|-----------------------|
+| MM.1S    | normal F27Y | normal F27Y AND F43Y  |
+| H3K9ac   |             | x                     |
+| H3F3A    |             |                       |
+| H3K27me3 | x           |                       |
+| H3K27ac  | x           |                       |
+| H3K4me1  | x           |                       |
+| H3K9me2  |             |                       |
+| H3K79me2 | x           |                       |
+| H3K36me3 |             | x                     |
+| H4K20me1 | x           |                       |
+| H3K9me3  |             |                       |
+| H2AFZ    |             | x                     |
+| H3K4me3  | x           |                       |
+| H3K4me2  |             | x                     |
+
+[Link to MM.1S ENCODE datasets](https://www.encodeproject.org/search/?type=Experiment&control_type%21=%2A&status=released&perturbed=false&assay_title=Histone+ChIP-seq&biosample_ontology.cell_slims=B+cell&biosample_ontology.term_name=MM.1S){.uri}
+
+[Link to healthy B-cell ENCODE datasets](https://www.encodeproject.org/search/?type=Experiment&control_type%21=%2A&status=released&perturbed=false&assay_title=Histone+ChIP-seq&biosample_ontology.cell_slims=B+cell&biosample_ontology.term_name=B+cell)
+
+## Analysis
+
+We are looking to perform some following differential analysis:
+
+-   Which types of histone modifications are enriched overall in the MM case?\
+    -\> Can we overall see an increase of acetylations and a decrease of methylations?
+
+    -\> How do we go about this? Do we perform pair-wise differntial analysis like we did in week 8 for each type of histone modification?
+
+-   Which genes are located in these peaks?\
+    -\> Are tumor supressor more methylated in MM.1S? Are proliferative genes more acetylated? Are they protein-coding or miRNA's or others?
+
+    -\> How would we go about this? Can we use the peaks and feed them to AnnotationHub data to see which genes are located there?
+
+-   Can we also use this data to look for transcription factors?\
+    -\> Can we look for motifs in these peaks
+
+-   Drug targets: Can we hypothesize about new drug targets?
+
+## Sources
+
+[1] <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7602661/>
+
+[2] <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7072128/>
+
+[3] <https://www.nature.com/articles/s41375-020-0785-1>
+
+[4] <https://www.cellosaurus.org/CVCL_8792>
